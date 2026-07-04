@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF to Markdown Converter — Free, Private, In-Browser</title>
+<meta name="description" content="Convert PDF files to Markdown instantly in your browser. Detects headings, bold, italic and lists. 100% private — files never leave your device.">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<style>
+  :root{
+    --ink:#182430;
+    --ink-soft:#4c5c6b;
+    --paper:#f4f6f8;
+    --sheet:#ffffff;
+    --line:#dde4ea;
+    --accent:#0e7c66;
+    --accent-deep:#0a5c4c;
+    --accent-wash:#e3f2ee;
+    --code-bg:#f0f3f5;
+    --radius:10px;
+    font-size:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    display:flex;flex-direction:column;
+  }
+  header{
+    padding:2.2rem 1.5rem 1.4rem;
+    text-align:center;
+  }
+  header h1{
+    font-size:1.7rem;
+    font-weight:700;
+    letter-spacing:-.02em;
+  }
+  header h1 .arrow{color:var(--accent);font-weight:400}
+  header p{
+    margin-top:.45rem;
+    color:var(--ink-soft);
+    font-size:.95rem;
+  }
+  main{
+    flex:1;
+    width:100%;
+    max-width:1100px;
+    margin:0 auto;
+    padding:0 1.5rem 3rem;
+  }
+
+  /* ---- drop zone styled as a sheet of paper with a folded corner ---- */
+  .dropzone{
+    position:relative;
+    background:var(--sheet);
+    border:1.5px dashed var(--line);
+    border-radius:var(--radius);
+    padding:3.2rem 1.5rem;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+    overflow:hidden;
+  }
+  .dropzone::after{
+    content:"";
+    position:absolute;top:0;right:0;
+    width:34px;height:34px;
+    background:linear-gradient(225deg, var(--paper) 50%, var(--accent-wash) 50%);
+    border-bottom-left-radius:8px;
+  }
+  .dropzone:hover,.dropzone.dragover{
+    border-color:var(--accent);
+    background:var(--accent-wash);
+  }
+  .dropzone:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  .dz-icon{
+    width:52px;height:52px;
+    margin:0 auto 1rem;
+    color:var(--accent);
+  }
+  .dropzone strong{font-size:1.05rem}
+  .dropzone small{display:block;margin-top:.4rem;color:var(--ink-soft)}
+  .privacy{
+    margin-top:.9rem;
+    text-align:center;
+    font-size:.8rem;
+    color:var(--ink-soft);
+  }
+  .privacy b{color:var(--accent-deep)}
+
+  /* ---- options ---- */
+  .options{
+    display:flex;gap:1.4rem;flex-wrap:wrap;justify-content:center;
+    margin-top:1rem;font-size:.88rem;color:var(--ink-soft);
+  }
+  .options label{display:flex;align-items:center;gap:.4rem;cursor:pointer}
+  .options input{accent-color:var(--accent);width:15px;height:15px}
+
+  /* ---- progress ---- */
+  .progress{display:none;margin-top:1.4rem;text-align:center}
+  .progress.active{display:block}
+  .bar{
+    height:8px;background:var(--line);border-radius:99px;overflow:hidden;
+    max-width:420px;margin:0 auto .55rem;
+  }
+  .bar > div{
+    height:100%;width:0;background:var(--accent);
+    border-radius:99px;transition:width .2s;
+  }
+  .progress span{font-size:.85rem;color:var(--ink-soft)}
+
+  /* ---- result ---- */
+  .result{display:none;margin-top:1.6rem}
+  .result.active{display:block}
+  .toolbar{
+    display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;
+    margin-bottom:.9rem;
+  }
+  .filename{
+    font-size:.9rem;color:var(--ink-soft);
+    margin-right:auto;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%;
+  }
+  button{
+    font:inherit;font-size:.88rem;font-weight:600;
+    padding:.55rem 1.05rem;
+    border-radius:8px;
+    border:1.5px solid var(--line);
+    background:var(--sheet);
+    color:var(--ink);
+    cursor:pointer;
+    transition:background .12s,border-color .12s;
+  }
+  button:hover{border-color:var(--accent);background:var(--accent-wash)}
+  button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  button.primary{
+    background:var(--accent);border-color:var(--accent);color:#fff;
+  }
+  button.primary:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
+
+  .panes{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:1rem;
+    min-height:420px;
+  }
+  .pane{
+    background:var(--sheet);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    display:flex;flex-direction:column;
+    overflow:hidden;
+  }
+  .pane-label{
+    font-size:.72rem;font-weight:700;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--ink-soft);
+    padding:.6rem .9rem;
+    border-bottom:1px solid var(--line);
+    background:var(--paper);
+  }
+  textarea#mdOut{
+    flex:1;
+    border:0;resize:none;
+    padding:1rem;
+    font-family:"Cascadia Code",Consolas,Menlo,monospace;
+    font-size:.83rem;line-height:1.55;
+    color:var(--ink);
+    background:var(--sheet);
+    white-space:pre-wrap;
+  }
+  textarea#mdOut:focus{outline:none}
+  #preview{
+    flex:1;overflow:auto;padding:1rem 1.2rem;
+    font-size:.92rem;line-height:1.6;
+  }
+  #preview h1,#preview h2,#preview h3,#preview h4{margin:1.1em 0 .45em;line-height:1.25}
+  #preview h1{font-size:1.45rem}
+  #preview h2{font-size:1.22rem}
+  #preview h3{font-size:1.06rem}
+  #preview p{margin:.55em 0}
+  #preview ul,#preview ol{margin:.55em 0 .55em 1.4em}
+  #preview code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font-size:.85em}
+  #preview hr{border:0;border-top:1px dashed var(--line);margin:1.2em 0}
+  #preview table{border-collapse:collapse;margin:.7em 0}
+  #preview td,#preview th{border:1px solid var(--line);padding:.3em .6em}
+
+  .error{
+    display:none;
+    margin-top:1.2rem;
+    background:#fdecea;color:#8a2820;
+    border:1px solid #f2c4bf;border-radius:8px;
+    padding:.8rem 1rem;font-size:.9rem;
+  }
+  .error.active{display:block}
+
+  footer{
+    text-align:center;padding:1.2rem;font-size:.78rem;color:var(--ink-soft);
+  }
+  @media (max-width:760px){
+    .panes{grid-template-columns:1fr}
+    .filename{max-width:100%}
+    header h1{font-size:1.4rem}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PDF <span class="arrow">&rarr;</span> Markdown</h1>
+  <p>Detects headings, bold, italics and lists — converted entirely in your browser.</p>
+</header>
+
+<main>
+  <div class="dropzone" id="dropzone" tabindex="0" role="button"
+       aria-label="Upload a PDF file. Click or drag and drop.">
+    <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+      <line x1="12" y1="18" x2="12" y2="11"/>
+      <polyline points="9 14 12 11 15 14"/>
+    </svg>
+    <strong>Drop your PDF here, or click to choose a file</strong>
+    <small>Text-based PDFs only (scanned documents need OCR first)</small>
+    <input type="file" id="fileInput" accept=".pdf,application/pdf" hidden>
+  </div>
+
+  <p class="privacy"><b>100% private</b> — your file is processed on your device and never uploaded.</p>
+
+  <div class="options">
+    <label><input type="checkbox" id="optHeadings" checked> Detect headings by font size</label>
+    <label><input type="checkbox" id="optPageBreaks"> Insert page separators (---)</label>
+  </div>
+
+  <div class="progress" id="progress" aria-live="polite">
+    <div class="bar"><div id="barFill"></div></div>
+    <span id="progressText">Reading page 1…</span>
+  </div>
+
+  <div class="error" id="errorBox" role="alert"></div>
+
+  <div class="result" id="result">
+    <div class="toolbar">
+      <span class="filename" id="fileLabel"></span>
+      <button id="copyBtn">Copy Markdown</button>
+      <button id="downloadBtn" class="primary">Download .md</button>
+      <button id="resetBtn">Convert another</button>
+    </div>
+    <div class="panes">
+      <div class="pane">
+        <div class="pane-label">Markdown</div>
+        <textarea id="mdOut" spellcheck="false" aria-label="Markdown output"></textarea>
+      </div>
+      <div class="pane">
+        <div class="pane-label">Preview</div>
+        <div id="preview"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>Runs entirely offline once loaded &middot; No sign-up, no limits</footer>
+
+<script>
+// The worker file is loaded above as a plain script tag, which defines
+// window.pdfjsWorker. pdf.js detects it and uses it directly — no dynamic
+// worker loading, so this works everywhere (strict sandboxes, file://,
+// webviews). Parsing runs on the main thread; we yield between pages to
+// keep the UI responsive.
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = id => document.getElementById(id);
+const dropzone = $("dropzone"), fileInput = $("fileInput");
+let currentName = "document";
+
+/* ---------------- UI wiring ---------------- */
+dropzone.addEventListener("click", () => fileInput.click());
+dropzone.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+});
+["dragover","dragenter"].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add("dragover"); }));
+["dragleave","drop"].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove("dragover"); }));
+dropzone.addEventListener("drop", e => {
+  const f = e.dataTransfer.files[0];
+  if (f) handleFile(f);
+});
+fileInput.addEventListener("change", () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+$("resetBtn").addEventListener("click", () => {
+  $("result").classList.remove("active");
+  $("errorBox").classList.remove("active");
+  fileInput.value = "";
+  dropzone.focus();
+});
+
+$("copyBtn").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("mdOut").value);
+    flash($("copyBtn"), "Copied!");
+  } catch {
+    $("mdOut").select();
+    document.execCommand("copy");
+    flash($("copyBtn"), "Copied!");
+  }
+});
+
+$("downloadBtn").addEventListener("click", () => {
+  const md = $("mdOut").value;
+  const name = currentName.replace(/\.pdf$/i, "") + ".md";
+  try {
+    // Standard method — works on any real host (GitHub Pages, Netlify, etc.)
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch {
+    // Fallback for environments that block blob URLs
+    const a = document.createElement("a");
+    a.href = "data:text/markdown;charset=utf-8," + encodeURIComponent(md);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+});
+
+$("mdOut").addEventListener("input", () => renderPreview($("mdOut").value));
+
+function flash(btn, msg) {
+  const old = btn.textContent;
+  btn.textContent = msg;
+  setTimeout(() => (btn.textContent = old), 1400);
+}
+
+function showError(msg) {
+  const box = $("errorBox");
+  box.textContent = msg;
+  box.classList.add("active");
+  $("progress").classList.remove("active");
+}
+
+/* ---------------- conversion pipeline ---------------- */
+async function handleFile(file) {
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") {
+    showError("That file is not a PDF. Choose a .pdf file to convert.");
+    return;
+  }
+  $("errorBox").classList.remove("active");
+  $("result").classList.remove("active");
+  $("progress").classList.add("active");
+  $("barFill").style.width = "0%";
+  currentName = file.name;
+
+  try {
+    const buf = await file.arrayBuffer();
+    const md = await pdfToMarkdown(buf, (done, total) => {
+      $("barFill").style.width = Math.round((done / total) * 100) + "%";
+      $("progressText").textContent = `Reading page ${done} of ${total}…`;
+    });
+    $("progress").classList.remove("active");
+    if (!md.trim()) {
+      showError("No selectable text was found in this PDF. It is probably a scanned document — run it through an OCR tool first, then try again.");
+      return;
+    }
+    $("mdOut").value = md;
+    renderPreview(md);
+    $("fileLabel").textContent = file.name;
+    $("result").classList.add("active");
+    $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (err) {
+    console.error(err);
+    if (String(err).includes("password")) {
+      showError("This PDF is password-protected. Remove the password first, then try again.");
+    } else {
+      showError("Could not read this PDF. The file may be damaged or use an unsupported format.");
+    }
+  }
+}
+
+function renderPreview(md) {
+  $("preview").innerHTML = marked.parse(md, { mangle: false, headerIds: false });
+}
+
+/* ---------------- PDF -> Markdown core ---------------- */
+async function pdfToMarkdown(arrayBuffer, onProgress) {
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const detectHeadings = $("optHeadings").checked;
+  const pageBreaks = $("optPageBreaks").checked;
+
+  const pages = [];
+  const sizeWeight = new Map(); // rounded font size -> character count
+
+  // Pass 1: collect positioned text spans from every page
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    // getOperatorList loads the real font objects into commonObjs,
+    // which is the only way to read actual font names (e.g. "Helvetica-Bold")
+    await page.getOperatorList();
+    const tc = await page.getTextContent();
+    const fontOf = id => {
+      try { const f = page.commonObjs.get(id); return (f && f.name) || ""; }
+      catch { return ""; }
+    };
+    const spans = [];
+    for (const it of tc.items) {
+      if (!("str" in it)) continue;
+      const style = tc.styles[it.fontName] || {};
+      const nameBlob = fontOf(it.fontName) + " " + (style.fontFamily || "");
+      const size = Math.hypot(it.transform[0], it.transform[1]);
+      spans.push({
+        str: it.str,
+        x: it.transform[4],
+        y: it.transform[5],
+        w: it.width || 0,
+        size,
+        bold: /bold|black|heavy|semibold|demibold/i.test(nameBlob),
+        italic: /italic|oblique/i.test(nameBlob)
+      });
+      const t = it.str.trim();
+      if (t) {
+        const k = Math.round(size);
+        sizeWeight.set(k, (sizeWeight.get(k) || 0) + t.length);
+      }
+    }
+    pages.push(spans);
+    onProgress(p, pdf.numPages);
+    // yield to the UI thread so the progress bar repaints
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  // Dominant font size = body text size
+  let bodySize = 12;
+  let best = -1;
+  for (const [s, w] of sizeWeight) if (w > best) { best = w; bodySize = s; }
+
+  const headingLevel = size => {
+    if (!detectHeadings) return 0;
+    if (size >= bodySize * 1.9) return 1;
+    if (size >= bodySize * 1.5) return 2;
+    if (size >= bodySize * 1.18) return 3;
+    return 0;
+  };
+
+  const mdPages = pages.map(spans => pageToMarkdown(spans, headingLevel));
+  const joiner = pageBreaks ? "\n\n---\n\n" : "\n\n";
+  return tidy(mdPages.filter(t => t.trim()).join(joiner));
+}
+
+function pageToMarkdown(spans, headingLevel) {
+  const visible = spans.filter(s => s.str.trim());
+  if (!visible.length) return "";
+
+  // Group spans into lines by their baseline y (tolerance scales with font size)
+  const lines = [];
+  const sorted = [...visible].sort((a, b) => b.y - a.y || a.x - b.x);
+  for (const s of sorted) {
+    const tol = Math.max(2, s.size * 0.45);
+    let line = lines.find(l => Math.abs(l.y - s.y) < tol);
+    if (!line) {
+      line = { y: s.y, size: 0, spans: [] };
+      lines.push(line);
+    }
+    line.spans.push(s);
+    line.size = Math.max(line.size, s.size);
+  }
+  lines.sort((a, b) => b.y - a.y);
+  lines.forEach(l => l.spans.sort((a, b) => a.x - b.x));
+
+  // Render each line, merging same-styled runs so ** ** doesn't fragment.
+  // pdf.js items often omit spaces between words, so insert one whenever
+  // there is a horizontal gap between consecutive spans.
+  for (const l of lines) {
+    const runs = [];
+    let prevEnd = null;
+    for (const s of l.spans) {
+      const gap = prevEnd === null ? 0 : s.x - prevEnd;
+      const needSpace = prevEnd !== null && gap > Math.max(1, s.size * 0.12);
+      const last = runs[runs.length - 1];
+      if (last && last.bold === s.bold && last.italic === s.italic) {
+        last.text += (needSpace ? " " : "") + s.str;
+      } else {
+        runs.push({ text: s.str, bold: s.bold, italic: s.italic });
+      }
+      prevEnd = s.x + s.w;
+    }
+    l.text = runs.map(r => {
+      let t = r.text.replace(/\s+/g, " ").trim();
+      if (!t) return "";
+      if (r.bold && r.italic) t = `***${t}***`;
+      else if (r.bold) t = `**${t}**`;
+      else if (r.italic) t = `*${t}*`;
+      return t;
+    }).filter(Boolean).join(" ");
+  }
+
+  // Assemble lines into blocks (paragraph break on big vertical gaps
+  // or when the heading level changes)
+  const blocks = [];
+  let cur = null;
+  let prev = null;
+  for (const l of lines) {
+    if (!l.text) continue;
+    const level = l.text.length < 130 ? headingLevel(l.size) : 0;
+    const gap = prev ? prev.y - l.y : 0;
+    const newBlock =
+      !cur ||
+      level !== cur.level ||
+      (prev && gap > Math.max(prev.size, l.size) * 1.7) ||
+      isBullet(l.text);
+    if (newBlock) {
+      cur = { level, lines: [] };
+      blocks.push(cur);
+    }
+    cur.lines.push(l.text);
+    prev = l;
+  }
+
+  // Render blocks
+  const out = [];
+  for (const b of blocks) {
+    let text = joinLines(b.lines);
+    if (b.level) {
+      text = text.replace(/\*+/g, ""); // headings carry emphasis via #
+      out.push("#".repeat(b.level) + " " + text);
+    } else if (isBullet(text)) {
+      out.push("- " + text.replace(/^[\s*]*[•▪◦‣·∙–—-]\s+/, ""));
+    } else if (/^\d+[.)]\s+/.test(text)) {
+      out.push(text.replace(/^(\d+)[.)]\s+/, "$1. "));
+    } else {
+      out.push(text);
+    }
+  }
+  return out.join("\n\n");
+}
+
+function isBullet(t) {
+  return /^[\s*]*[•▪◦‣·∙]\s+/.test(t) || /^[–—-]\s+\S/.test(t);
+}
+
+function joinLines(arr) {
+  // Join wrapped lines; repair hyphenation at line ends
+  let out = "";
+  for (const line of arr) {
+    if (!out) { out = line; continue; }
+    if (/[A-Za-z]-$/.test(out)) out = out.slice(0, -1) + line; // de-hyphenate
+    else out += " " + line;
+  }
+  return out;
+}
+
+function tidy(text) {
+  return text
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim() + "\n";
+}
+</script>
+</body>
+</html>
